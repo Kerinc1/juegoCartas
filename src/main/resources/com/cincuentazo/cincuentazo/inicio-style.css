@@ -1,0 +1,103 @@
+/* ===== Pantalla de inicio — Cincuentazo ===== */
+
+/* Fondo general */
+.root-pane {
+    -fx-background-color: #1a1a2e;
+}
+
+/* Título principal */
+.titulo {
+    -fx-font-size: 52px;
+    -fx-font-weight: bold;
+    -fx-text-fill: #e94560;
+    -fx-font-family: "Segoe UI";
+    -fx-effect: dropshadow(gaussian, rgba(233,69,96,0.6), 20, 0, 0, 4);
+}
+
+/* Subtítulo del juego */
+.subtitulo {
+    -fx-font-size: 17px;
+    -fx-text-fill: #a8a8b3;
+    -fx-font-family: "Segoe UI";
+}
+
+/* Pregunta de selección */
+.pregunta {
+    -fx-font-size: 15px;
+    -fx-text-fill: #cccccc;
+    -fx-font-family: "Segoe UI";
+}
+
+/* Botones de selección de cantidad (ToggleButton) */
+.toggle-jugador {
+    -fx-background-color: #16213e;
+    -fx-background-insets: 0;
+    -fx-background-radius: 14;
+    -fx-border-color: #e94560;
+    -fx-border-width: 2.5;
+    -fx-border-radius: 14;
+    -fx-text-fill: #ffffff;
+    -fx-font-size: 34px;
+    -fx-font-weight: bold;
+    -fx-font-family: "Segoe UI";
+    -fx-cursor: hand;
+    -fx-pref-width: 95px;
+    -fx-pref-height: 95px;
+    -fx-min-width: 95px;
+    -fx-min-height: 95px;
+    -fx-max-width: 95px;
+    -fx-max-height: 95px;
+    -fx-alignment: center;
+}
+
+.toggle-jugador:hover {
+    -fx-background-color: #0f3460;
+    -fx-effect: dropshadow(gaussian, rgba(233,69,96,0.3), 8, 0, 0, 0);
+}
+
+/* Estado seleccionado — resaltado con color de acento */
+.toggle-jugador:selected {
+    -fx-background-color: #e94560;
+    -fx-border-color: #e94560;
+    -fx-effect: dropshadow(gaussian, rgba(233,69,96,0.7), 14, 0, 0, 2);
+}
+
+/* Etiqueta informativa de selección actual */
+.lbl-seleccion {
+    -fx-font-size: 14px;
+    -fx-text-fill: #00d4aa;
+    -fx-font-style: italic;
+    -fx-font-family: "Segoe UI";
+}
+
+/* Botón iniciar — estado activo */
+.btn-iniciar {
+    -fx-background-color: #e94560;
+    -fx-background-insets: 0;
+    -fx-background-radius: 30;
+    -fx-text-fill: #ffffff;
+    -fx-font-size: 15px;
+    -fx-font-weight: bold;
+    -fx-font-family: "Segoe UI";
+    -fx-padding: 13 55 13 55;
+    -fx-cursor: hand;
+    -fx-effect: dropshadow(gaussian, rgba(233,69,96,0.5), 12, 0, 0, 4);
+}
+
+.btn-iniciar:hover {
+    -fx-background-color: #c73652;
+    -fx-effect: dropshadow(gaussian, rgba(233,69,96,0.8), 18, 0, 0, 5);
+}
+
+.btn-iniciar:pressed {
+    -fx-background-color: #a02a42;
+    -fx-effect: none;
+}
+
+/* Botón iniciar — deshabilitado */
+.btn-iniciar:disabled {
+    -fx-background-color: #2e2e4a;
+    -fx-text-fill: #666688;
+    -fx-cursor: default;
+    -fx-effect: none;
+}
