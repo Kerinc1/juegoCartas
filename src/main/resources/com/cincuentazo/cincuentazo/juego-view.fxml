@@ -1,0 +1,92 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<?import javafx.geometry.Insets?>
+<?import javafx.scene.control.Label?>
+<?import javafx.scene.layout.BorderPane?>
+<?import javafx.scene.layout.HBox?>
+<?import javafx.scene.layout.StackPane?>
+<?import javafx.scene.layout.VBox?>
+
+<!--
+  Vista principal del tablero de juego — HU-2: Preparación del juego.
+
+  Distribución:
+    · Superior  (top)   : paneles de oponentes máquina (poblados dinámicamente).
+    · Central (center)  : mazo boca abajo · panel de suma · carta boca arriba de la mesa.
+    · Inferior  (bottom): mano del jugador humano (cartas boca arriba).
+
+  Controlador: com.cincuentazo.cincuentazo.controller.JuegoController
+-->
+<StackPane xmlns:fx="http://javafx.com/fxml/1"
+           fx:controller="com.cincuentazo.cincuentazo.controller.JuegoController"
+           styleClass="tablero-raiz"
+           stylesheets="@juego-style.css"
+           prefWidth="1200"
+           prefHeight="800">
+
+    <BorderPane>
+
+        <!-- ============================================================
+             TOP: Zona de máquinas oponentes
+             El HBox se rellena en JuegoController#renderizarMaquinas()
+             ============================================================ -->
+        <top>
+            <HBox fx:id="contenedorMaquinas"
+                  alignment="CENTER"
+                  spacing="28"
+                  styleClass="zona-maquinas"/>
+        </top>
+
+        <!-- ============================================================
+             CENTER: Mesa de juego
+             ============================================================ -->
+        <center>
+            <HBox alignment="CENTER"
+                  spacing="55"
+                  styleClass="zona-central">
+
+                <!-- Mazo boca abajo (efecto de profundidad en controlador) -->
+                <VBox alignment="CENTER" spacing="10" styleClass="subzona">
+                    <StackPane fx:id="vistaMazo" styleClass="slot-mazo"/>
+                    <Label fx:id="lblCantidadMazo"
+                           text="-- cartas"
+                           styleClass="lbl-zona"/>
+                </VBox>
+
+                <!-- Panel de la suma actual -->
+                <VBox alignment="CENTER" spacing="6" styleClass="panel-suma">
+                    <Label text="SUMA ACTUAL" styleClass="lbl-suma-titulo"/>
+                    <Label fx:id="lblSumaActual"
+                           text="0"
+                           styleClass="lbl-suma-valor"/>
+                </VBox>
+
+                <!-- Carta inicial de la mesa (boca arriba) -->
+                <VBox alignment="CENTER" spacing="10" styleClass="subzona">
+                    <StackPane fx:id="contenedorCartaMesa"
+                               styleClass="slot-carta-mesa"/>
+                    <Label text="MESA" styleClass="lbl-zona"/>
+                </VBox>
+
+            </HBox>
+        </center>
+
+        <!-- ============================================================
+             BOTTOM: Mano del jugador humano
+             ============================================================ -->
+        <bottom>
+            <VBox alignment="CENTER"
+                  spacing="12"
+                  styleClass="zona-humano">
+                <Label text="TU MANO" styleClass="lbl-jugador-titulo"/>
+                <HBox fx:id="contenedorManoHumano"
+                      alignment="CENTER"
+                      spacing="18"/>
+                <padding>
+                    <Insets top="20" right="30" bottom="26" left="30"/>
+                </padding>
+            </VBox>
+        </bottom>
+
+    </BorderPane>
+</StackPane>

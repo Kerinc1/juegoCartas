@@ -1,0 +1,95 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<?import javafx.geometry.Insets?>
+<?import javafx.scene.control.Button?>
+<?import javafx.scene.control.Label?>
+<?import javafx.scene.control.ToggleButton?>
+<?import javafx.scene.control.ToggleGroup?>
+<?import javafx.scene.layout.HBox?>
+<?import javafx.scene.layout.Region?>
+<?import javafx.scene.layout.VBox?>
+
+<!--
+  Vista de la pantalla de inicio — HU-1: Inicio del juego.
+  Permite al jugador humano seleccionar 1, 2 o 3 oponentes máquina
+  antes de comenzar la partida.
+  Controlador: com.cincuentazo.cincuentazo.controller.InicioController
+-->
+<VBox alignment="CENTER"
+      spacing="18.0"
+      styleClass="root-pane"
+      stylesheets="@inicio-style.css"
+      xmlns:fx="http://javafx.com/fxml/1"
+      fx:controller="com.cincuentazo.cincuentazo.controller.InicioController">
+
+    <padding>
+        <Insets top="50" right="80" bottom="50" left="80"/>
+    </padding>
+
+    <!-- Definición del ToggleGroup compartido por los tres botones de selección -->
+    <fx:define>
+        <ToggleGroup fx:id="grupoJugadores"/>
+    </fx:define>
+
+    <!-- ===== Encabezado ===== -->
+    <Label text="CINCUENTAZO" styleClass="titulo"/>
+    <Label text="El juego de las cartas" styleClass="subtitulo"/>
+
+    <Region prefHeight="25"/>
+
+    <!-- ===== Sección de selección ===== -->
+    <Label text="¿Contra cuántos jugadores máquina deseas jugar?" styleClass="pregunta"/>
+
+    <HBox alignment="CENTER" spacing="35.0">
+        <padding>
+            <Insets top="8" bottom="8"/>
+        </padding>
+
+        <!-- Opción: 1 jugador máquina -->
+        <ToggleButton fx:id="btnUnoJugador"
+                      text="1"
+                      styleClass="toggle-jugador"
+                      accessibleText="Un jugador máquina">
+            <toggleGroup>
+                <fx:reference source="grupoJugadores"/>
+            </toggleGroup>
+        </ToggleButton>
+
+        <!-- Opción: 2 jugadores máquina -->
+        <ToggleButton fx:id="btnDosJugadores"
+                      text="2"
+                      styleClass="toggle-jugador"
+                      accessibleText="Dos jugadores máquina">
+            <toggleGroup>
+                <fx:reference source="grupoJugadores"/>
+            </toggleGroup>
+        </ToggleButton>
+
+        <!-- Opción: 3 jugadores máquina -->
+        <ToggleButton fx:id="btnTresJugadores"
+                      text="3"
+                      styleClass="toggle-jugador"
+                      accessibleText="Tres jugadores máquina">
+            <toggleGroup>
+                <fx:reference source="grupoJugadores"/>
+            </toggleGroup>
+        </ToggleButton>
+    </HBox>
+
+    <!-- Texto descriptivo de la selección actual (actualizado desde el controlador) -->
+    <Label fx:id="lblSeleccion"
+           text=""
+           styleClass="lbl-seleccion"
+           minHeight="24"/>
+
+    <Region prefHeight="15"/>
+
+    <!-- Botón principal — deshabilitado hasta seleccionar oponentes -->
+    <Button fx:id="btnIniciar"
+            text="INICIAR JUEGO"
+            styleClass="btn-iniciar"
+            onAction="#onIniciarJuego"
+            defaultButton="true"
+            accessibleText="Iniciar partida con los jugadores seleccionados"/>
+
+</VBox>
