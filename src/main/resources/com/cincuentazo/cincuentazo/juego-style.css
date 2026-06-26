@@ -268,6 +268,21 @@
 }
 
 /* ================================================================
+   HU-5: Eliminación de jugadores
+   ================================================================ */
+
+/* Etiqueta "✖ ELIMINADO" en el panel de una máquina eliminada */
+.lbl-eliminado-maquina {
+    -fx-font-family: "Segoe UI";
+    -fx-font-size: 12px;
+    -fx-font-weight: bold;
+    -fx-text-fill: #e94560;
+    -fx-letter-spacing: 2px;
+    -fx-padding: 6 0 2 0;
+    -fx-effect: dropshadow(gaussian, rgba(233,69,96,0.45), 8, 0, 0, 0);
+}
+
+/* ================================================================
    Slots contenedores
    ================================================================ */
 

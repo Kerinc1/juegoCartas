@@ -12,6 +12,7 @@ import javafx.fxml.FXML;
 import javafx.geometry.Insets;
 import javafx.geometry.Pos;
 import javafx.scene.control.Label;
+import javafx.scene.effect.ColorAdjust;
 import javafx.scene.layout.AnchorPane;
 import javafx.scene.layout.HBox;
 import javafx.scene.layout.StackPane;
@@ -22,33 +23,31 @@ import java.util.Map;
 import java.util.Random;
 
 /**
- * Controlador del tablero de juego — HU-4: Tomar una carta del mazo.
+ * Controlador del tablero de juego — HU-5: Eliminación de un jugador.
  *
- * <p>Extiende la funcionalidad de HU-3 cerrando el ciclo completo de un turno:
- * <em>jugar una carta → robar del mazo → pasar el turno</em>.</p>
+ * <p>Extiende HU-4 con la detección y gestión de eliminación cuando un jugador
+ * no tiene movimientos válidos al inicio de su turno.</p>
  *
- * <p><strong>Flujo del turno humano (HU-4):</strong></p>
+ * <p><strong>Flujo del turno humano (HU-4 + HU-5):</strong></p>
  * <ol>
+ *   <li>Al inicio: si no hay movimientos válidos → {@link #eliminarVisualmenteHumano()}
+ *       + {@link CincuentazoGame#eliminarJugador} + avanzar turno (1,8 s).</li>
  *   <li>Click en carta → {@link #manejarClickCarta(Carta)} valida y juega.</li>
- *   <li>Actualización inmediata de mesa y suma.</li>
- *   <li>Robo automático del mazo: si el mazo estaba vacío se muestra el aviso
- *       de reciclaje durante 1,2 s antes de continuar.</li>
- *   <li>Re-render de la mano del humano (4 cartas) y del contador del mazo.</li>
- *   <li>Avance de turno → turno de la máquina.</li>
+ *   <li>Robo automático del mazo; avance de turno.</li>
  * </ol>
  *
- * <p><strong>Flujo del turno máquina (HU-4):</strong></p>
+ * <p><strong>Flujo del turno máquina (HU-4 + HU-5):</strong></p>
  * <ol>
+ *   <li>Al inicio: si no hay movimientos válidos → {@link #eliminarVisualmenteMaquina(Maquina)}
+ *       + eliminar en modelo + avanzar turno (1,2 s).</li>
  *   <li>Task 1 (2–4 s, hilo daemon): selección y jugada de la carta.</li>
- *   <li>{@link Platform#runLater}: actualización de mesa, suma y panel de la máquina.</li>
+ *   <li>{@link Platform#runLater}: actualización de mesa, suma y panel.</li>
  *   <li>Task 2 (2–4 s, hilo daemon): simulación del tiempo de robo.</li>
- *   <li>{@link Platform#runLater}: robo del mazo, dorso añadido al panel,
- *       contador actualizado; si hubo reciclaje se muestra aviso 1,5 s.</li>
  *   <li>Avance de turno → siguiente turno.</li>
  * </ol>
  *
- * <p>Toda actualización de la interfaz gráfica se ejecuta obligatoriamente
- * en el <em>JavaFX Application Thread</em> via {@link Platform#runLater}.</p>
+ * <p>Toda actualización de la interfaz gráfica se ejecuta en el
+ * <em>JavaFX Application Thread</em> via {@link Platform#runLater}.</p>
  */
 public class JuegoController {
 
@@ -61,6 +60,8 @@ public class JuegoController {
     @FXML private Label     lblSumaActual;
     @FXML private HBox      contenedorManoHumano;
     @FXML private Label     lblEstado;
+    /** Zona inferior completa del humano; se le aplica desaturación al ser eliminado (HU-5). */
+    @FXML private VBox      zonaHumano;
 
     // ── Estado del controlador ───────────────────────────────────────────
 
@@ -71,6 +72,12 @@ public class JuegoController {
      * Permite agregar o eliminar cartas sin reconstruir el panel completo.
      */
     private final Map<Maquina, HBox> manosPanelesMaquina = new HashMap<>();
+
+    /**
+     * Mapa que asocia cada máquina con su {@link VBox} contenedor de panel completo.
+     * Necesario para aplicar efectos de eliminación (desaturación, opacidad) en HU-5.
+     */
+    private final Map<Maquina, VBox> panelesMaquina = new HashMap<>();
 
     /** Fuente de aleatoriedad para los retardos de simulación (2–4 s). */
     private final Random random = new Random();
@@ -100,6 +107,7 @@ public class JuegoController {
 
     private void renderizarTablero() {
         manosPanelesMaquina.clear();
+        panelesMaquina.clear();
         renderizarMaquinas();
         renderizarMazo();
         renderizarCartaMesa();
@@ -120,6 +128,7 @@ public class JuegoController {
         VBox panel = new VBox(10);
         panel.setAlignment(Pos.CENTER);
         panel.getStyleClass().add("panel-maquina");
+        panelesMaquina.put(maquina, panel); // HU-5: referencia para efectos de eliminación
 
         Label nombre = new Label(maquina.getNombre().toUpperCase());
         nombre.getStyleClass().add("lbl-maquina-nombre");
@@ -266,14 +275,23 @@ public class JuegoController {
     // ── Gestión de turnos ─────────────────────────────────────────────────
 
     /**
-     * Evalúa el turno activo:
+     * Evalúa el turno activo con detección de eliminación (HU-5):
      * <ul>
-     *   <li>Humano → reconstruye la mano con interactividad.</li>
-     *   <li>Máquina → deshabilita la mano y lanza la simulación asíncrona.</li>
+     *   <li>Humano sin movimientos → se elimina visualmente, se avanza el turno
+     *       y se cede el control al siguiente jugador activo tras 1,8 s.</li>
+     *   <li>Humano con movimientos → reconstruye la mano con interactividad.</li>
+     *   <li>Máquina → deshabilita la mano del humano y lanza la simulación asíncrona.</li>
      * </ul>
      */
     private void procesarSiguienteTurno() {
         if (juego.esTurnoHumano()) {
+            if (!juego.tieneMovimientosValidos(juego.getJugadorHumano())) {
+                eliminarVisualmenteHumano();
+                juego.eliminarJugador(juego.getJugadorHumano());
+                juego.avanzarTurno();
+                ejecutarDespuesDePausa(1800, this::procesarSiguienteTurno);
+                return;
+            }
             renderizarManoHumano();
             actualizarEstado("TU TURNO — Selecciona una carta");
         } else {
@@ -301,6 +319,16 @@ public class JuegoController {
      * @param maquina máquina cuyo turno se debe simular
      */
     private void procesarTurnoMaquina(Maquina maquina) {
+        // HU-5: si la máquina no tiene movimientos válidos, se elimina de inmediato
+        if (!juego.tieneMovimientosValidos(maquina)) {
+            actualizarEstado("✖  " + maquina.getNombre() + " sin movimientos — eliminada.");
+            eliminarVisualmenteMaquina(maquina);
+            juego.eliminarJugador(maquina);
+            juego.avanzarTurno();
+            ejecutarDespuesDePausa(1200, this::procesarSiguienteTurno);
+            return;
+        }
+
         actualizarEstado("⏳  " + maquina.getNombre() + " pensando…");
 
         // ─── Fase 1: selección y jugada ───────────────────────────────────
@@ -446,6 +474,68 @@ public class JuegoController {
     /** Sincroniza la etiqueta de suma con el valor del modelo. */
     private void actualizarSuma() {
         lblSumaActual.setText(String.valueOf(juego.getSumaActual()));
+    }
+
+    // ── Efectos visuales de eliminación — HU-5 ───────────────────────────
+
+    /**
+     * Aplica el estado visual de "eliminada" al panel de una máquina:
+     * <ul>
+     *   <li>Desaturación total (escala de grises) con {@link ColorAdjust}.</li>
+     *   <li>Reducción de opacidad al 40 %.</li>
+     *   <li>Limpieza de los dorsos de carta del panel.</li>
+     *   <li>Inserción de la etiqueta {@code "✖  ELIMINADA"}.</li>
+     * </ul>
+     *
+     * @param maquina máquina cuyo panel se debe degradar visualmente
+     */
+    private void eliminarVisualmenteMaquina(Maquina maquina) {
+        VBox panel = panelesMaquina.get(maquina);
+        if (panel == null) return;
+
+        ColorAdjust gris = new ColorAdjust();
+        gris.setSaturation(-1.0);
+        panel.setEffect(gris);
+        panel.setOpacity(0.40);
+
+        HBox filaDorsos = manosPanelesMaquina.get(maquina);
+        if (filaDorsos != null) filaDorsos.getChildren().clear();
+
+        Label lbl = new Label("✖  ELIMINADA");
+        lbl.getStyleClass().add("lbl-eliminado-maquina");
+        panel.getChildren().add(lbl);
+    }
+
+    /**
+     * Aplica el estado visual de "eliminado" a la zona del jugador humano:
+     * <ul>
+     *   <li>Deshabilita e inicia la mano del humano (sin cartas visibles).</li>
+     *   <li>Colorea el {@code lblEstado} en rojo con glow para el anuncio.</li>
+     *   <li>Aplica una ligera desaturación a toda la {@code zonaHumano}.</li>
+     * </ul>
+     *
+     * <p>Se invoca antes de {@link CincuentazoGame#eliminarJugador(Jugador)}
+     * para que la UI refleje el cambio de inmediato.</p>
+     */
+    private void eliminarVisualmenteHumano() {
+        contenedorManoHumano.setDisable(true);
+        contenedorManoHumano.getChildren().clear();
+
+        if (lblEstado != null) {
+            lblEstado.setStyle(
+                "-fx-text-fill: #e94560;" +
+                "-fx-font-size: 15px;" +
+                "-fx-font-weight: bold;" +
+                "-fx-effect: dropshadow(gaussian, rgba(233,69,96,0.55), 14, 0, 0, 0);"
+            );
+            lblEstado.setText("✖  ¡Has sido eliminado! Observa cómo termina la partida…");
+        }
+
+        if (zonaHumano != null) {
+            ColorAdjust gris = new ColorAdjust();
+            gris.setSaturation(-0.75);
+            zonaHumano.setEffect(gris);
+        }
     }
 
     // ── Fábricas de nodos de carta ────────────────────────────────────────

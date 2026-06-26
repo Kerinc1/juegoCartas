@@ -684,6 +684,162 @@ class CincuentazoGameTest {
     }
 
     // ═════════════════════════════════════════════════════════════════════
+    // HU-5 — Eliminación de jugador
+    // ═════════════════════════════════════════════════════════════════════
+
+    @Nested
+    @DisplayName("HU-5 · Eliminación de jugador")
+    class EliminacionJugadorTests {
+
+        private CincuentazoGame juego;
+        private Humano          humano;
+        private Maquina         maquina;
+
+        @BeforeEach
+        void setUp() {
+            juego   = crearJuego(2); // humano + 2 máquinas para probar skip de turno
+            humano  = juego.getJugadorHumano();
+            maquina = juego.getMaquinas().get(0);
+        }
+
+        // ── tieneMovimientosValidos ────────────────────────────────────────
+
+        @Test
+        @DisplayName("tieneMovimientosValidos retorna true cuando suma=0 (toda carta es jugable)")
+        void testTieneMovimientosValidos_sumaZero_retornaTrue() {
+            juego.setSumaActual(0);
+            assertTrue(juego.tieneMovimientosValidos(humano),
+                    "Con suma 0 cualquier carta suma ≤ 50, debe haber movimientos válidos");
+        }
+
+        @Test
+        @DisplayName("tieneMovimientosValidos retorna false con solo cartas de suma positiva y mesa=50")
+        void testTieneMovimientosValidos_sinJugables_retornaFalse() {
+            // Con sumaActual=50, los números 2-8 y 10 superan 50; el As también (50+1=51 ya que
+            // calcularImpacto(As)=1 cuando 50+10>50). Figuras y 9 sí son jugables; damos solo cartas positivas.
+            juego.setSumaActual(50);
+            humano.devolverTodasLasCartas(); // limpia la mano para controlar el escenario
+            humano.recibirCarta(new Carta(Rango.DOS,    Palo.CORAZONES));   // 50+2=52 > 50
+            humano.recibirCarta(new Carta(Rango.TRES,   Palo.PICAS));       // 50+3=53 > 50
+            humano.recibirCarta(new Carta(Rango.CUATRO, Palo.DIAMANTES));   // 50+4=54 > 50
+            humano.recibirCarta(new Carta(Rango.AS,     Palo.TREBOLES));    // As→1; 50+1=51 > 50
+            assertFalse(juego.tieneMovimientosValidos(humano),
+                    "Con suma=50 y mano de cartas de impacto positivo, no debe haber movimientos");
+        }
+
+        @Test
+        @DisplayName("tieneMovimientosValidos retorna false para mano vacía")
+        void testTieneMovimientosValidos_manoVacia_retornaFalse() {
+            juego.setSumaActual(10);
+            humano.devolverTodasLasCartas();
+            assertFalse(juego.tieneMovimientosValidos(humano),
+                    "Una mano vacía no tiene movimientos válidos (anyMatch sobre stream vacío = false)");
+        }
+
+        // ── eliminarJugador ────────────────────────────────────────────────
+
+        @Test
+        @DisplayName("eliminarJugador marca al humano como inactivo")
+        void testEliminarJugador_humano_marcaComoInactivo() {
+            assertTrue(humano.isActivo(), "Pre-condición: humano activo");
+            juego.eliminarJugador(humano);
+            assertFalse(humano.isActivo(), "Tras eliminar, el humano debe estar inactivo");
+        }
+
+        @Test
+        @DisplayName("eliminarJugador vacía completamente la mano del jugador")
+        void testEliminarJugador_vaciaMano() {
+            assertFalse(humano.getMano().isEmpty(), "Pre-condición: humano tiene cartas");
+            juego.eliminarJugador(humano);
+            assertEquals(0, humano.getCantidadCartas(),
+                    "Tras ser eliminado, la mano del jugador debe quedar vacía");
+        }
+
+        @Test
+        @DisplayName("eliminarJugador envía exactamente las cartas de la mano a la pila de descarte")
+        void testEliminarJugador_cartasVanADescarte() {
+            int cartasEnMano  = humano.getCantidadCartas();
+            int descarteAntes = juego.getPilaDescarte().size();
+            juego.eliminarJugador(humano);
+            assertEquals(descarteAntes + cartasEnMano, juego.getPilaDescarte().size(),
+                    "Todas las cartas de la mano deben pasar íntegramente al descarte");
+        }
+
+        @Test
+        @DisplayName("eliminarJugador funciona igual para una máquina (inactiva + mano vacía)")
+        void testEliminarJugador_maquina_marcaComoInactivo() {
+            assertTrue(maquina.isActivo(), "Pre-condición: máquina activa");
+            juego.eliminarJugador(maquina);
+            assertAll(
+                () -> assertFalse(maquina.isActivo(), "La máquina debe quedar inactiva"),
+                () -> assertEquals(0, maquina.getCantidadCartas(), "La mano de la máquina debe vaciarse")
+            );
+        }
+
+        // ── avanzarTurno con jugadores eliminados ─────────────────────────
+
+        @Test
+        @DisplayName("avanzarTurno salta la máquina eliminada y regresa al humano")
+        void testAvanzarTurno_saltaMaquinaEliminada() {
+            // ciclo: humano(0) → maquina1(1) → maquina2(2) → humano(0)
+            // Eliminar maquina2 (índice 1 en lista → turno 2)
+            Maquina maquina2 = juego.getMaquinas().get(1);
+            juego.eliminarJugador(maquina2);
+
+            juego.avanzarTurno(); // 0 → 1 (maquina1, activa)
+            assertFalse(juego.esTurnoHumano(), "turno 1 debe ser de maquina1");
+
+            juego.avanzarTurno(); // 1 → (2 eliminado, se salta) → 0
+            assertTrue(juego.esTurnoHumano(),
+                    "avanzarTurno debe saltar maquina2 eliminada y volver al humano");
+        }
+
+        @Test
+        @DisplayName("avanzarTurno salta al humano eliminado y llega a la primera máquina activa")
+        void testAvanzarTurno_humanoEliminado_saltaAMaquina() {
+            juego.eliminarJugador(humano);
+
+            // Desde turno 0 (humano eliminado), avanzar debe encontrar maquina1 (turno 1)
+            juego.avanzarTurno();
+            assertAll(
+                () -> assertFalse(juego.esTurnoHumano(),
+                        "Con humano eliminado, el turno no debe volver a índice 0"),
+                () -> assertEquals(1, juego.getTurnoActual(),
+                        "Debe avanzar a la primera máquina activa (turno 1)")
+            );
+        }
+
+        // ── contarJugadoresActivos ────────────────────────────────────────
+
+        @Test
+        @DisplayName("contarJugadoresActivos retorna 3 al inicio (humano + 2 máquinas)")
+        void testContarJugadoresActivos_inicio() {
+            assertEquals(3, juego.contarJugadoresActivos(),
+                    "Al inicio: humano + 2 máquinas = 3 activos");
+        }
+
+        @Test
+        @DisplayName("contarJugadoresActivos decrece correctamente al eliminar jugadores")
+        void testContarJugadoresActivos_decrece() {
+            juego.eliminarJugador(humano);
+            assertEquals(2, juego.contarJugadoresActivos(), "Tras eliminar al humano → 2 activos");
+            juego.eliminarJugador(maquina);
+            assertEquals(1, juego.contarJugadoresActivos(), "Tras eliminar maquina1 → 1 activo");
+        }
+
+        // ── isActivo en Jugador ───────────────────────────────────────────
+
+        @Test
+        @DisplayName("Todo jugador recién creado comienza en estado activo")
+        void testJugador_nuevoEstaActivo() {
+            assertAll(
+                () -> assertTrue(new Humano().isActivo(),  "Humano nuevo debe estar activo"),
+                () -> assertTrue(new Maquina(1).isActivo(), "Maquina nueva debe estar activa")
+            );
+        }
+    }
+
+    // ═════════════════════════════════════════════════════════════════════
     // HU-3 — Gestión de turnos
     // ═════════════════════════════════════════════════════════════════════
 

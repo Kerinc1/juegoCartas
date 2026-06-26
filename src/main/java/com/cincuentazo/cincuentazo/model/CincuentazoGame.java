@@ -279,14 +279,81 @@ public class CincuentazoGame {
         pilaDescarte.clear();
     }
 
+    // ── Lógica de eliminación — HU-5 ────────────────────────────────────
+
+    /**
+     * Determina si el jugador dado tiene al menos un movimiento válido
+     * con la suma actual de la mesa.
+     *
+     * <p>Itera sobre cada carta de la mano y delega en {@link #esJugable(Carta)}.
+     * Si la mano está vacía retorna {@code false}: sin cartas, no hay movimientos.</p>
+     *
+     * @param jugador jugador a evaluar; no puede ser {@code null}
+     * @return {@code true} si al menos una carta de la mano puede jugarse
+     */
+    public boolean tieneMovimientosValidos(Jugador jugador) {
+        return jugador.getMano().stream().anyMatch(this::esJugable);
+    }
+
+    /**
+     * Elimina a un jugador de la partida:
+     * <ol>
+     *   <li>Lo marca como inactivo ({@link Jugador#setActivo(boolean) setActivo(false)}).</li>
+     *   <li>Retira todas sus cartas de la mano mediante
+     *       {@link Jugador#devolverTodasLasCartas()}.</li>
+     *   <li>Inserta esas cartas en {@link #pilaDescarte} para que queden disponibles
+     *       en el reciclaje automático.</li>
+     * </ol>
+     *
+     * @param jugador jugador a eliminar; no puede ser {@code null}
+     */
+    public void eliminarJugador(Jugador jugador) {
+        jugador.setActivo(false);
+        List<Carta> devueltas = jugador.devolverTodasLasCartas();
+        pilaDescarte.addAll(devueltas);
+    }
+
+    /**
+     * Retorna cuántos participantes (humano y/o máquinas) siguen activos en la partida.
+     *
+     * @return número de jugadores activos (≥ 0)
+     */
+    public int contarJugadoresActivos() {
+        int total = jugadorHumano.isActivo() ? 1 : 0;
+        for (Maquina m : maquinas) {
+            if (m.isActivo()) total++;
+        }
+        return total;
+    }
+
     // ── Gestión de turnos ────────────────────────────────────────────────
 
     /**
-     * Avanza al siguiente turno de forma circular:
-     * humano (0) → máquina 1 (1) → … → máquina N (N) → humano (0).
+     * Avanza al siguiente turno de forma circular, saltando automáticamente
+     * los jugadores que hayan sido eliminados (HU-5).
+     *
+     * <p>El ciclo natural es: humano (0) → máquina 1 (1) → … → máquina N (N) → humano (0).
+     * Si el candidato al siguiente turno está inactivo, se sigue avanzando hasta
+     * encontrar un jugador activo. El bucle se detiene como máximo tras {@code total}
+     * intentos para evitar un ciclo infinito cuando no queda ningún jugador activo.</p>
      */
     public void avanzarTurno() {
-        turnoActual = (turnoActual + 1) % (1 + maquinas.size());
+        int total    = 1 + maquinas.size();
+        int intentos = 0;
+        do {
+            turnoActual = (turnoActual + 1) % total;
+            intentos++;
+        } while (!obtenerJugadorEnTurnoActual().isActivo() && intentos < total);
+    }
+
+    /**
+     * Retorna el {@link Jugador} al que corresponde el {@link #turnoActual}.
+     *
+     * @return {@link #jugadorHumano} si {@code turnoActual == 0};
+     *         la {@link Maquina} de índice {@code turnoActual - 1} en otro caso
+     */
+    private Jugador obtenerJugadorEnTurnoActual() {
+        return turnoActual == 0 ? jugadorHumano : maquinas.get(turnoActual - 1);
     }
 
     /**
