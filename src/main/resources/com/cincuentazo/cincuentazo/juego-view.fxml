@@ -72,18 +72,24 @@
         </center>
 
         <!-- ============================================================
-             BOTTOM: Mano del jugador humano
+             BOTTOM: Mano del jugador humano + indicador de estado (HU-3)
              ============================================================ -->
         <bottom>
             <VBox alignment="CENTER"
-                  spacing="12"
+                  spacing="10"
                   styleClass="zona-humano">
                 <Label text="TU MANO" styleClass="lbl-jugador-titulo"/>
                 <HBox fx:id="contenedorManoHumano"
                       alignment="CENTER"
                       spacing="18"/>
+                <!-- Etiqueta dinámica de turno: "TU TURNO", "Máquina X pensando…", etc. -->
+                <Label fx:id="lblEstado"
+                       text=""
+                       styleClass="lbl-estado"
+                       maxWidth="Infinity"
+                       alignment="CENTER"/>
                 <padding>
-                    <Insets top="20" right="30" bottom="26" left="30"/>
+                    <Insets top="18" right="30" bottom="22" left="30"/>
                 </padding>
             </VBox>
         </bottom>
