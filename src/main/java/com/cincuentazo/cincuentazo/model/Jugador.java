@@ -22,16 +22,23 @@ public abstract class Jugador {
      */
     private final List<Carta> mano;
 
+    /**
+     * Indica si el jugador sigue participando en la partida.
+     * Se vuelve {@code false} cuando es eliminado por no tener movimientos válidos (HU-5).
+     */
+    private boolean activo;
+
     // ── constructor ──────────────────────────────────────────────────────
 
     /**
-     * Crea un jugador con el nombre indicado y la mano vacía.
+     * Crea un jugador con el nombre indicado, la mano vacía y en estado activo.
      *
      * @param nombre nombre del jugador; no puede ser {@code null} ni vacío
      */
     protected Jugador(String nombre) {
         this.nombre = nombre;
         this.mano   = new ArrayList<>(4);
+        this.activo = true;
     }
 
     // ── operaciones ──────────────────────────────────────────────────────
@@ -83,6 +90,42 @@ public abstract class Jugador {
      */
     public int getCantidadCartas() {
         return mano.size();
+    }
+
+    /**
+     * Indica si el jugador sigue activo en la partida.
+     *
+     * @return {@code true} si el jugador no ha sido eliminado
+     */
+    public boolean isActivo() {
+        return activo;
+    }
+
+    // ── mutadores (package-private, solo el modelo los usa) ─────────────
+
+    /**
+     * Cambia el estado de actividad del jugador.
+     * Exclusivo para {@link CincuentazoGame#eliminarJugador(Jugador)}.
+     *
+     * @param activo {@code false} para marcar al jugador como eliminado
+     */
+    void setActivo(boolean activo) {
+        this.activo = activo;
+    }
+
+    /**
+     * Retira todas las cartas de la mano, las devuelve en una lista nueva y
+     * deja la mano vacía.
+     *
+     * <p>Invocado por {@link CincuentazoGame#eliminarJugador(Jugador)} para
+     * reinsertar las cartas en la pila de descarte.</p>
+     *
+     * @return lista con todas las cartas que tenía el jugador
+     */
+    List<Carta> devolverTodasLasCartas() {
+        List<Carta> devueltas = new ArrayList<>(mano);
+        mano.clear();
+        return devueltas;
     }
 
     // ── Object ───────────────────────────────────────────────────────────

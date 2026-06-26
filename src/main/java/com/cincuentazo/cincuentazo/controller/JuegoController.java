@@ -3,6 +3,7 @@ package com.cincuentazo.cincuentazo.controller;
 import com.cincuentazo.cincuentazo.model.Carta;
 import com.cincuentazo.cincuentazo.model.CincuentazoGame;
 import com.cincuentazo.cincuentazo.model.ConfiguracionJuego;
+import com.cincuentazo.cincuentazo.model.MazoAgotadoException;
 import com.cincuentazo.cincuentazo.model.Maquina;
 import com.cincuentazo.cincuentazo.model.MovimientoInvalidoException;
 import javafx.application.Platform;
@@ -11,6 +12,7 @@ import javafx.fxml.FXML;
 import javafx.geometry.Insets;
 import javafx.geometry.Pos;
 import javafx.scene.control.Label;
+import javafx.scene.effect.ColorAdjust;
 import javafx.scene.layout.AnchorPane;
 import javafx.scene.layout.HBox;
 import javafx.scene.layout.StackPane;
@@ -21,75 +23,67 @@ import java.util.Map;
 import java.util.Random;
 
 /**
- * Controlador del tablero de juego — HU-3: Jugar una carta.
+ * Controlador del tablero de juego — HU-5: Eliminación de un jugador.
  *
- * <p>Extiende la funcionalidad de HU-2 añadiendo interactividad completa:</p>
- * <ul>
- *   <li>Manejadores de clic sobre las cartas del jugador humano.</li>
- *   <li>Validación de jugadas contra la regla del límite de 50 puntos.</li>
- *   <li>Simulación asíncrona del turno de las máquinas (2–4 s) mediante
- *       {@link Task} en un hilo de fondo; nunca bloquea el
- *       <em>JavaFX Application Thread</em>.</li>
- *   <li>Actualización de UI (suma, carta de la mesa, manos, estado) siempre
- *       dentro de {@link Platform#runLater(Runnable)} para garantizar
- *       la seguridad de hilos.</li>
- *   <li>Indicador de estado dinámico ("Máquina X pensando…" / "TU TURNO").</li>
- * </ul>
+ * <p>Extiende HU-4 con la detección y gestión de eliminación cuando un jugador
+ * no tiene movimientos válidos al inicio de su turno.</p>
  *
- * <p>El método {@link #inicializarJuego(ConfiguracionJuego)} debe invocarse
- * desde {@link InicioController} tras cargar el FXML y antes de mostrar
- * el {@code Stage}.</p>
+ * <p><strong>Flujo del turno humano (HU-4 + HU-5):</strong></p>
+ * <ol>
+ *   <li>Al inicio: si no hay movimientos válidos → {@link #eliminarVisualmenteHumano()}
+ *       + {@link CincuentazoGame#eliminarJugador} + avanzar turno (1,8 s).</li>
+ *   <li>Click en carta → {@link #manejarClickCarta(Carta)} valida y juega.</li>
+ *   <li>Robo automático del mazo; avance de turno.</li>
+ * </ol>
+ *
+ * <p><strong>Flujo del turno máquina (HU-4 + HU-5):</strong></p>
+ * <ol>
+ *   <li>Al inicio: si no hay movimientos válidos → {@link #eliminarVisualmenteMaquina(Maquina)}
+ *       + eliminar en modelo + avanzar turno (1,2 s).</li>
+ *   <li>Task 1 (2–4 s, hilo daemon): selección y jugada de la carta.</li>
+ *   <li>{@link Platform#runLater}: actualización de mesa, suma y panel.</li>
+ *   <li>Task 2 (2–4 s, hilo daemon): simulación del tiempo de robo.</li>
+ *   <li>Avance de turno → siguiente turno.</li>
+ * </ol>
+ *
+ * <p>Toda actualización de la interfaz gráfica se ejecuta en el
+ * <em>JavaFX Application Thread</em> via {@link Platform#runLater}.</p>
  */
 public class JuegoController {
 
     // ── Inyecciones FXML ─────────────────────────────────────────────────
 
-    /** Contenedor horizontal de los paneles de cada máquina oponente. */
     @FXML private HBox      contenedorMaquinas;
-
-    /** StackPane del mazo apilado (efecto de profundidad). */
     @FXML private StackPane vistaMazo;
-
-    /** Etiqueta con la cantidad de cartas restantes en el mazo. */
     @FXML private Label     lblCantidadMazo;
-
-    /** Contenedor de la carta central de la mesa (boca arriba). */
     @FXML private StackPane contenedorCartaMesa;
-
-    /** Etiqueta numérica grande con la suma acumulada actual. */
     @FXML private Label     lblSumaActual;
-
-    /** Contenedor horizontal de las cartas del jugador humano. */
     @FXML private HBox      contenedorManoHumano;
-
-    /**
-     * Etiqueta de estado dinámica: muestra "TU TURNO", "Máquina X pensando…"
-     * o el nombre de la carta que acaba de jugar la máquina.
-     */
     @FXML private Label     lblEstado;
+    /** Zona inferior completa del humano; se le aplica desaturación al ser eliminado (HU-5). */
+    @FXML private VBox      zonaHumano;
 
     // ── Estado del controlador ───────────────────────────────────────────
 
-    /** Modelo central de la partida. */
     private CincuentazoGame juego;
 
     /**
-     * Mapa que asocia cada máquina con el {@link HBox} interior de su panel
-     * de cartas, para poder actualizar el número de dorsos sin reconstruir
-     * todo el contenedor de máquinas.
+     * Mapa que asocia cada máquina con el {@link HBox} de dorsos de su panel.
+     * Permite agregar o eliminar cartas sin reconstruir el panel completo.
      */
     private final Map<Maquina, HBox> manosPanelesMaquina = new HashMap<>();
 
-    /** Fuente de aleatoriedad para los retardos de las máquinas (2–4 s). */
+    /**
+     * Mapa que asocia cada máquina con su {@link VBox} contenedor de panel completo.
+     * Necesario para aplicar efectos de eliminación (desaturación, opacidad) en HU-5.
+     */
+    private final Map<Maquina, VBox> panelesMaquina = new HashMap<>();
+
+    /** Fuente de aleatoriedad para los retardos de simulación (2–4 s). */
     private final Random random = new Random();
 
     // ── Ciclo de vida FXML ───────────────────────────────────────────────
 
-    /**
-     * Invocado automáticamente por JavaFX tras cargar el FXML.
-     * El juego se configura en {@link #inicializarJuego(ConfiguracionJuego)};
-     * en este punto la {@link ConfiguracionJuego} aún no ha llegado.
-     */
     @FXML
     public void initialize() {
         // No-op intencional: el estado llega vía inicializarJuego().
@@ -98,13 +92,10 @@ public class JuegoController {
     // ── API pública ──────────────────────────────────────────────────────
 
     /**
-     * Inicializa el modelo de la partida, renderiza el tablero completo y
-     * muestra el mensaje inicial de estado para el turno del jugador humano.
+     * Inicializa el modelo y renderiza el tablero completo.
+     * Debe ser invocado desde {@link InicioController} tras cargar el FXML.
      *
-     * <p>Debe ser invocado por {@link InicioController} inmediatamente después
-     * de obtener esta instancia mediante {@code FXMLLoader.getController()}.</p>
-     *
-     * @param configuracion número de máquinas oponentes seleccionado
+     * @param configuracion configuración con el número de máquinas oponentes
      */
     public void inicializarJuego(ConfiguracionJuego configuracion) {
         this.juego = new CincuentazoGame(configuracion);
@@ -112,14 +103,11 @@ public class JuegoController {
         actualizarEstado("TU TURNO — Selecciona una carta");
     }
 
-    // ── Renderizado completo ──────────────────────────────────────────────
+    // ── Renderizado del tablero ───────────────────────────────────────────
 
-    /**
-     * Coordina el renderizado inicial de todos los elementos del tablero.
-     * Limpia los mapas de referencias y reconstruye el árbol de escena completo.
-     */
     private void renderizarTablero() {
         manosPanelesMaquina.clear();
+        panelesMaquina.clear();
         renderizarMaquinas();
         renderizarMazo();
         renderizarCartaMesa();
@@ -129,10 +117,6 @@ public class JuegoController {
 
     // ── Zona de máquinas ─────────────────────────────────────────────────
 
-    /**
-     * Construye un panel visual por cada máquina oponente y guarda la
-     * referencia a su HBox de cartas para actualizaciones parciales.
-     */
     private void renderizarMaquinas() {
         contenedorMaquinas.getChildren().clear();
         for (Maquina maquina : juego.getMaquinas()) {
@@ -140,18 +124,11 @@ public class JuegoController {
         }
     }
 
-    /**
-     * Construye el panel visual de una máquina: etiqueta de nombre y fila de
-     * cartas boca abajo. Almacena el {@link HBox} interior en
-     * {@link #manosPanelesMaquina} para actualizarlo cuando la máquina juegue.
-     *
-     * @param maquina máquina oponente a representar
-     * @return VBox listo para insertar en {@link #contenedorMaquinas}
-     */
     private VBox crearPanelMaquina(Maquina maquina) {
         VBox panel = new VBox(10);
         panel.setAlignment(Pos.CENTER);
         panel.getStyleClass().add("panel-maquina");
+        panelesMaquina.put(maquina, panel); // HU-5: referencia para efectos de eliminación
 
         Label nombre = new Label(maquina.getNombre().toUpperCase());
         nombre.getStyleClass().add("lbl-maquina-nombre");
@@ -161,8 +138,6 @@ public class JuegoController {
         for (int i = 0; i < maquina.getCantidadCartas(); i++) {
             mano.getChildren().add(crearCartaDorso(false));
         }
-
-        // Guardar referencia para actualizar tras la jugada de la máquina
         manosPanelesMaquina.put(maquina, mano);
 
         panel.getChildren().addAll(nombre, mano);
@@ -170,28 +145,39 @@ public class JuegoController {
     }
 
     /**
-     * Elimina un dorso del panel de mano de la máquina para reflejar que
-     * acaba de jugar una carta. No reconstruye el panel completo; solo
-     * elimina el último hijo del HBox.
+     * Quita el último dorso del panel de una máquina cuando juega una carta.
      *
      * @param maquina máquina que acaba de jugar
      */
-    private void actualizarManoMaquina(Maquina maquina) {
+    private void quitarDorsoAMaquina(Maquina maquina) {
         HBox mano = manosPanelesMaquina.get(maquina);
         if (mano != null && !mano.getChildren().isEmpty()) {
             mano.getChildren().remove(mano.getChildren().size() - 1);
         }
     }
 
+    /**
+     * Añade un dorso al panel de una máquina cuando roba una carta del mazo.
+     *
+     * @param maquina máquina que acaba de robar
+     */
+    private void agregarDorsoAMaquina(Maquina maquina) {
+        HBox mano = manosPanelesMaquina.get(maquina);
+        if (mano != null) {
+            mano.getChildren().add(crearCartaDorso(false));
+        }
+    }
+
     // ── Mazo ─────────────────────────────────────────────────────────────
 
     /**
-     * Renderiza el mazo con hasta 3 capas desplazadas diagonalmente para
-     * simular profundidad. Actualiza también la etiqueta de cantidad.
+     * Reconstruye la representación visual del mazo (hasta 3 capas) y
+     * actualiza de forma reactiva la etiqueta del contador de cartas.
      */
     private void renderizarMazo() {
         vistaMazo.getChildren().clear();
-        int capas = Math.min(juego.getMazo().getTamanio(), 3);
+        int tamano = juego.getMazo().getTamanio();
+        int capas  = Math.min(tamano, 3);
         for (int i = capas - 1; i >= 0; i--) {
             StackPane capa = new StackPane();
             capa.getStyleClass().add("card-back-mazo");
@@ -199,31 +185,22 @@ public class JuegoController {
             capa.setTranslateY(-i * 2.5);
             vistaMazo.getChildren().add(capa);
         }
-        lblCantidadMazo.setText(juego.getMazo().getTamanio() + " cartas");
+        lblCantidadMazo.setText(tamano + " cartas");
     }
 
     // ── Carta de la mesa ─────────────────────────────────────────────────
 
-    /**
-     * Reconstruye el contenedor de la carta de la mesa con la carta actual
-     * del modelo, mostrándola boca arriba con el estilo diferenciado.
-     */
     private void renderizarCartaMesa() {
         contenedorCartaMesa.getChildren().clear();
         contenedorCartaMesa.getChildren().add(
-            crearCartaFrontal(juego.getCartaMesa(), true)
-        );
+            crearCartaFrontal(juego.getCartaMesa(), true));
     }
 
     // ── Mano del jugador humano ───────────────────────────────────────────
 
     /**
-     * Reconstruye la mano del jugador humano habilitando el contenedor y
-     * añadiendo un manejador de clic solo a las cartas jugables según el
-     * estado actual de la suma. Las cartas no jugables se muestran atenuadas.
-     *
-     * <p>Este método también se usa para restaurar el estado interactivo de
-     * la mano después de que la(s) máquina(s) terminen su turno.</p>
+     * Reconstruye la mano del humano con interactividad: cartas jugables
+     * reciben un listener de clic; las no jugables aparecen atenuadas.
      */
     private void renderizarManoHumano() {
         contenedorManoHumano.setDisable(false);
@@ -231,9 +208,7 @@ public class JuegoController {
 
         for (Carta carta : juego.getJugadorHumano().getMano()) {
             StackPane nodo = crearCartaFrontal(carta, false);
-            boolean jugable = juego.esJugable(carta);
-
-            if (jugable) {
+            if (juego.esJugable(carta)) {
                 nodo.setOnMouseClicked(e -> manejarClickCarta(carta));
             } else {
                 nodo.getStyleClass().add("carta-no-jugable");
@@ -243,18 +218,15 @@ public class JuegoController {
         }
     }
 
-    // ── Manejador de clic — humano ────────────────────────────────────────
+    // ── Manejador de clic — humano (HU-3 + HU-4) ─────────────────────────
 
     /**
-     * Gestiona el clic sobre una carta del jugador humano.
-     *
-     * <p>Delegación de responsabilidades:</p>
+     * Gestiona el clic sobre una carta del humano:
      * <ol>
-     *   <li>Ignora el evento si el turno no es del humano (protección extra).</li>
-     *   <li>Intenta ejecutar la jugada en el modelo; captura
-     *       {@link MovimientoInvalidoException} si la carta es inválida.</li>
-     *   <li>Si la jugada es válida, actualiza todos los componentes visuales
-     *       afectados y cede el turno a la siguiente máquina.</li>
+     *   <li>Juega la carta en el modelo (HU-3).</li>
+     *   <li>Roba automáticamente una carta del mazo (HU-4).</li>
+     *   <li>Si el robo provocó un reciclaje del descarte, muestra el aviso
+     *       durante 1,2 s antes de ceder el turno.</li>
      * </ol>
      *
      * @param carta carta sobre la que el usuario hizo clic
@@ -262,148 +234,236 @@ public class JuegoController {
     private void manejarClickCarta(Carta carta) {
         if (!juego.esTurnoHumano()) return;
 
+        // ── Paso 1: jugar la carta ──────────────────────────────────────
         try {
             juego.jugarCarta(juego.getJugadorHumano(), carta);
         } catch (MovimientoInvalidoException e) {
-            // Retroalimentación visual sin interrumpir el flujo
             actualizarEstado("⚠  " + e.getMessage());
             return;
         }
 
-        // Refrescar todos los componentes afectados por la jugada
         renderizarCartaMesa();
-        renderizarManoHumano();
         actualizarSuma();
+
+        // ── Paso 2: robar del mazo ──────────────────────────────────────
+        boolean reciclado;
+        try {
+            reciclado = juego.robarCartaParaJugador(juego.getJugadorHumano());
+        } catch (MazoAgotadoException e) {
+            renderizarManoHumano();
+            renderizarMazo();
+            actualizarEstado("⛔  " + e.getMessage());
+            return; // fin de partida gestionado en HU futura
+        }
+
+        renderizarManoHumano();
         renderizarMazo();
 
-        juego.avanzarTurno();
-        procesarSiguienteTurno();
+        // ── Paso 3: avanzar turno con o sin pausa de reciclaje ──────────
+        if (reciclado) {
+            actualizarEstado("♻  Rebarajando la mesa en el mazo…");
+            ejecutarDespuesDePausa(1200, () -> {
+                juego.avanzarTurno();
+                procesarSiguienteTurno();
+            });
+        } else {
+            juego.avanzarTurno();
+            procesarSiguienteTurno();
+        }
     }
 
     // ── Gestión de turnos ─────────────────────────────────────────────────
 
     /**
-     * Evalúa el turno activo y actúa en consecuencia:
+     * Evalúa el turno activo con detección de eliminación (HU-5):
      * <ul>
-     *   <li>Si es el turno del humano: rehabilita la mano, actualiza el estado.</li>
-     *   <li>Si es el turno de una máquina: deshabilita la mano y lanza la
-     *       simulación asíncrona de la máquina correspondiente.</li>
+     *   <li>Humano sin movimientos → se elimina visualmente, se avanza el turno
+     *       y se cede el control al siguiente jugador activo tras 1,8 s.</li>
+     *   <li>Humano con movimientos → reconstruye la mano con interactividad.</li>
+     *   <li>Máquina → deshabilita la mano del humano y lanza la simulación asíncrona.</li>
      * </ul>
      */
     private void procesarSiguienteTurno() {
         if (juego.esTurnoHumano()) {
-            renderizarManoHumano(); // reconstruye con estado de jugabilidad actualizado
+            if (!juego.tieneMovimientosValidos(juego.getJugadorHumano())) {
+                eliminarVisualmenteHumano();
+                juego.eliminarJugador(juego.getJugadorHumano());
+                juego.avanzarTurno();
+                ejecutarDespuesDePausa(1800, this::procesarSiguienteTurno);
+                return;
+            }
+            renderizarManoHumano();
             actualizarEstado("TU TURNO — Selecciona una carta");
         } else {
-            contenedorManoHumano.setDisable(true); // bloquea el HBox completo
+            contenedorManoHumano.setDisable(true);
             procesarTurnoMaquina(juego.getMaquinaActual());
         }
     }
 
-    // ── Turno de la máquina — lógica asíncrona ────────────────────────────
+    // ── Turno de la máquina — jugar + robar asíncronos ───────────────────
 
     /**
-     * Simula el "pensamiento" de una máquina mediante un {@link Task} que
-     * se ejecuta en un hilo de fondo, respetando estrictamente la regla de
-     * no bloquear el <em>JavaFX Application Thread</em>.
+     * Ejecuta el turno completo de una máquina en dos fases asíncronas:
      *
-     * <p><strong>Flujo detallado:</strong></p>
-     * <ol>
-     *   <li>Muestra el indicador "⏳ Máquina X pensando…" en el hilo de UI.</li>
-     *   <li>El {@link Task} duerme entre 2 000 y 4 000 ms en el hilo de fondo.</li>
-     *   <li>Selecciona la primera carta jugable de la mano de la máquina.</li>
-     *   <li>Al completarse, {@link Platform#runLater(Runnable)} actualiza la UI:
-     *       carta de la mesa, panel de la máquina, suma y mazo.</li>
-     *   <li>Lanza una breve pausa de 700 ms (también en hilo de fondo) para
-     *       dar tiempo a leer el estado antes del próximo turno.</li>
-     *   <li>Llama recursivamente a {@link #procesarSiguienteTurno()} en el JAT.</li>
-     * </ol>
+     * <p><strong>Fase 1 — Jugar (Task en hilo daemon, 2–4 s):</strong>
+     * selecciona la primera carta jugable y llama a {@code jugarCarta}.</p>
+     *
+     * <p><strong>Fase 2 — Robar (Task en hilo daemon, 2–4 s):</strong>
+     * llama a {@code robarCartaParaJugador} y actualiza el panel de dorsos
+     * y el contador del mazo. Si hubo reciclaje, muestra el aviso 1,5 s
+     * antes de avanzar.</p>
+     *
+     * <p>Toda actualización de la UI se ejecuta dentro de
+     * {@link Platform#runLater} para respetar el <em>JavaFX Application Thread</em>.</p>
      *
      * @param maquina máquina cuyo turno se debe simular
      */
     private void procesarTurnoMaquina(Maquina maquina) {
+        // HU-5: si la máquina no tiene movimientos válidos, se elimina de inmediato
+        if (!juego.tieneMovimientosValidos(maquina)) {
+            actualizarEstado("✖  " + maquina.getNombre() + " sin movimientos — eliminada.");
+            eliminarVisualmenteMaquina(maquina);
+            juego.eliminarJugador(maquina);
+            juego.avanzarTurno();
+            ejecutarDespuesDePausa(1200, this::procesarSiguienteTurno);
+            return;
+        }
+
         actualizarEstado("⏳  " + maquina.getNombre() + " pensando…");
 
-        Task<Carta> tareaIA = new Task<>() {
+        // ─── Fase 1: selección y jugada ───────────────────────────────────
+        Task<Carta> tareaJugar = new Task<>() {
             @Override
             protected Carta call() throws InterruptedException {
-                // Retardo aleatorio 2 000–4 000 ms en hilo de fondo (NO el JAT)
-                long retardo = 2000L + random.nextInt(2001);
-                Thread.sleep(retardo);
-
-                // Seleccionar la primera carta jugable de la mano de la máquina
+                Thread.sleep(2000L + random.nextInt(2001)); // 2–4 s
                 for (Carta c : maquina.getMano()) {
-                    if (juego.esJugable(c)) {
-                        return c;
-                    }
+                    if (juego.esJugable(c)) return c;
                 }
-                return null; // sin cartas jugables (borde: será gestionado en HU futura)
+                return null; // sin cartas jugables
             }
         };
 
-        tareaIA.setOnSucceeded(evento -> {
-            // OBLIGATORIO: toda modificación de UI en el JavaFX Application Thread
-            Platform.runLater(() -> {
-                Carta cartaElegida = tareaIA.getValue();
+        tareaJugar.setOnSucceeded(ev1 -> Platform.runLater(() -> {
+            Carta cartaElegida = tareaJugar.getValue();
 
-                if (cartaElegida != null) {
-                    try {
-                        juego.jugarCarta(maquina, cartaElegida);
-                    } catch (MovimientoInvalidoException ex) {
-                        // No debería ocurrir: ya validamos con esJugable()
-                        actualizarEstado("Error interno en el turno de " + maquina.getNombre());
-                        juego.avanzarTurno();
-                        procesarSiguienteTurno();
-                        return;
-                    }
-                    actualizarManoMaquina(maquina);
-                    renderizarCartaMesa();
-                    actualizarSuma();
-                    renderizarMazo();
-                    actualizarEstado(maquina.getNombre() + " jugó: " + cartaElegida);
-                } else {
-                    actualizarEstado(maquina.getNombre() + " no tiene cartas jugables — pasa turno.");
+            if (cartaElegida == null) {
+                // Sin cartas jugables: sólo avanza el turno, no se roba
+                actualizarEstado(maquina.getNombre() + " no tiene cartas jugables — pasa turno.");
+                juego.avanzarTurno();
+                ejecutarDespuesDePausa(700, JuegoController.this::procesarSiguienteTurno);
+                return;
+            }
+
+            try {
+                juego.jugarCarta(maquina, cartaElegida);
+            } catch (MovimientoInvalidoException ex) {
+                manejarErrorTurnoMaquina(maquina);
+                return;
+            }
+
+            quitarDorsoAMaquina(maquina);
+            renderizarCartaMesa();
+            actualizarSuma();
+            actualizarEstado(maquina.getNombre() + " jugó: " + cartaElegida + "  —  Robando carta…");
+
+            // ─── Fase 2: robo del mazo ────────────────────────────────────
+            Task<Boolean> tareaRobar = new Task<>() {
+                @Override
+                protected Boolean call() throws InterruptedException {
+                    Thread.sleep(2000L + random.nextInt(2001)); // 2–4 s
+                    // El robo se hace aquí para no bloquear el JAT
+                    return juego.robarCartaParaJugador(maquina);
                 }
+            };
+
+            tareaRobar.setOnSucceeded(ev2 -> Platform.runLater(() -> {
+                boolean reciclado = tareaRobar.getValue();
+                agregarDorsoAMaquina(maquina);
+                renderizarMazo();
 
                 juego.avanzarTurno();
 
-                // Pausa visual de 700 ms antes del siguiente turno para legibilidad
-                Task<Void> pausa = new Task<>() {
-                    @Override
-                    protected Void call() throws InterruptedException {
-                        Thread.sleep(700);
-                        return null;
-                    }
-                };
-                pausa.setOnSucceeded(e2 ->
-                    Platform.runLater(JuegoController.this::procesarSiguienteTurno));
-                Thread hiloPausa = new Thread(pausa);
-                hiloPausa.setDaemon(true);
-                hiloPausa.start();
-            });
-        });
+                if (reciclado) {
+                    actualizarEstado("♻  Rebarajando la mesa en el mazo…");
+                    ejecutarDespuesDePausa(1500, JuegoController.this::procesarSiguienteTurno);
+                } else {
+                    ejecutarDespuesDePausa(700, JuegoController.this::procesarSiguienteTurno);
+                }
+            }));
 
-        tareaIA.setOnFailed(evento -> {
-            Platform.runLater(() -> {
-                actualizarEstado("Error inesperado en el turno de " + maquina.getNombre() + ".");
-                juego.avanzarTurno();
-                procesarSiguienteTurno();
-            });
-        });
+            tareaRobar.setOnFailed(ev2 -> Platform.runLater(() -> {
+                Throwable causa = tareaRobar.getException();
+                if (causa instanceof MazoAgotadoException) {
+                    actualizarEstado("⛔  " + causa.getMessage());
+                } else {
+                    manejarErrorTurnoMaquina(maquina);
+                }
+            }));
 
-        Thread hiloIA = new Thread(tareaIA);
-        hiloIA.setDaemon(true); // el hilo no impide cerrar la aplicación
-        hiloIA.start();
+            iniciarHiloDaemon(tareaRobar);
+        }));
+
+        tareaJugar.setOnFailed(ev1 -> Platform.runLater(() ->
+            manejarErrorTurnoMaquina(maquina)));
+
+        iniciarHiloDaemon(tareaJugar);
+    }
+
+    // ── Helpers de concurrencia ───────────────────────────────────────────
+
+    /**
+     * Ejecuta {@code accion} en el JavaFX Application Thread tras una pausa de
+     * {@code ms} milisegundos en un hilo daemon independiente.
+     *
+     * <p>Centraliza el patrón {@code Task + Thread.sleep + Platform.runLater}
+     * para evitar duplicación en los flujos de turno.</p>
+     *
+     * @param ms      milisegundos de espera antes de ejecutar la acción
+     * @param accion  código a ejecutar en el JAT tras la pausa
+     */
+    private void ejecutarDespuesDePausa(long ms, Runnable accion) {
+        Task<Void> pausa = new Task<>() {
+            @Override
+            protected Void call() throws InterruptedException {
+                Thread.sleep(ms);
+                return null;
+            }
+        };
+        pausa.setOnSucceeded(e -> Platform.runLater(accion));
+        iniciarHiloDaemon(pausa);
+    }
+
+    /**
+     * Inicia un {@link Task} en un hilo daemon para que no impida el cierre
+     * de la aplicación JavaFX.
+     *
+     * @param tarea tarea a ejecutar en segundo plano
+     */
+    private void iniciarHiloDaemon(Task<?> tarea) {
+        Thread hilo = new Thread(tarea);
+        hilo.setDaemon(true);
+        hilo.start();
+    }
+
+    /**
+     * Gestiona un error inesperado durante el turno de una máquina:
+     * muestra un mensaje, avanza el turno y continúa la partida.
+     *
+     * @param maquina máquina cuyo turno falló
+     */
+    private void manejarErrorTurnoMaquina(Maquina maquina) {
+        actualizarEstado("Error inesperado en el turno de " + maquina.getNombre() + ".");
+        juego.avanzarTurno();
+        procesarSiguienteTurno();
     }
 
     // ── Helpers de UX ────────────────────────────────────────────────────
 
     /**
      * Actualiza la etiqueta de estado dinámica del tablero.
-     * La llamada es segura desde cualquier hilo si se asegura el JAT por contexto;
-     * desde hilos de fondo siempre se envuelve en {@link Platform#runLater(Runnable)}.
+     * Debe llamarse siempre desde el JavaFX Application Thread.
      *
-     * @param mensaje texto informativo a mostrar al usuario
+     * @param mensaje texto a mostrar al usuario
      */
     private void actualizarEstado(String mensaje) {
         if (lblEstado != null) {
@@ -411,9 +471,71 @@ public class JuegoController {
         }
     }
 
-    /** Sincroniza la etiqueta numérica de suma con el valor actual del modelo. */
+    /** Sincroniza la etiqueta de suma con el valor del modelo. */
     private void actualizarSuma() {
         lblSumaActual.setText(String.valueOf(juego.getSumaActual()));
+    }
+
+    // ── Efectos visuales de eliminación — HU-5 ───────────────────────────
+
+    /**
+     * Aplica el estado visual de "eliminada" al panel de una máquina:
+     * <ul>
+     *   <li>Desaturación total (escala de grises) con {@link ColorAdjust}.</li>
+     *   <li>Reducción de opacidad al 40 %.</li>
+     *   <li>Limpieza de los dorsos de carta del panel.</li>
+     *   <li>Inserción de la etiqueta {@code "✖  ELIMINADA"}.</li>
+     * </ul>
+     *
+     * @param maquina máquina cuyo panel se debe degradar visualmente
+     */
+    private void eliminarVisualmenteMaquina(Maquina maquina) {
+        VBox panel = panelesMaquina.get(maquina);
+        if (panel == null) return;
+
+        ColorAdjust gris = new ColorAdjust();
+        gris.setSaturation(-1.0);
+        panel.setEffect(gris);
+        panel.setOpacity(0.40);
+
+        HBox filaDorsos = manosPanelesMaquina.get(maquina);
+        if (filaDorsos != null) filaDorsos.getChildren().clear();
+
+        Label lbl = new Label("✖  ELIMINADA");
+        lbl.getStyleClass().add("lbl-eliminado-maquina");
+        panel.getChildren().add(lbl);
+    }
+
+    /**
+     * Aplica el estado visual de "eliminado" a la zona del jugador humano:
+     * <ul>
+     *   <li>Deshabilita e inicia la mano del humano (sin cartas visibles).</li>
+     *   <li>Colorea el {@code lblEstado} en rojo con glow para el anuncio.</li>
+     *   <li>Aplica una ligera desaturación a toda la {@code zonaHumano}.</li>
+     * </ul>
+     *
+     * <p>Se invoca antes de {@link CincuentazoGame#eliminarJugador(Jugador)}
+     * para que la UI refleje el cambio de inmediato.</p>
+     */
+    private void eliminarVisualmenteHumano() {
+        contenedorManoHumano.setDisable(true);
+        contenedorManoHumano.getChildren().clear();
+
+        if (lblEstado != null) {
+            lblEstado.setStyle(
+                "-fx-text-fill: #e94560;" +
+                "-fx-font-size: 15px;" +
+                "-fx-font-weight: bold;" +
+                "-fx-effect: dropshadow(gaussian, rgba(233,69,96,0.55), 14, 0, 0, 0);"
+            );
+            lblEstado.setText("✖  ¡Has sido eliminado! Observa cómo termina la partida…");
+        }
+
+        if (zonaHumano != null) {
+            ColorAdjust gris = new ColorAdjust();
+            gris.setSaturation(-0.75);
+            zonaHumano.setEffect(gris);
+        }
     }
 
     // ── Fábricas de nodos de carta ────────────────────────────────────────
@@ -421,44 +543,38 @@ public class JuegoController {
     /**
      * Construye un {@link StackPane} que representa una carta boca arriba.
      *
-     * <p>Distribución interna con {@link AnchorPane} para posicionamiento
-     * pixel-exacto de los cuatro elementos visuales de la carta:</p>
+     * <p>Distribución con {@link AnchorPane} para posicionamiento pixel-exacto:</p>
      * <pre>
      *  StackPane [card-face | card-face-mesa]
      *    └── AnchorPane
-     *          ├── Label palo  — esquina superior-izquierda (pequeño)
-     *          ├── Label palo  — esquina superior-derecha   (balance visual)
-     *          ├── Label palo  — centro                     (grande, protagonista)
-     *          └── Label rango — esquina inferior-izquierda (bold)
+     *          ├── Label palo — esquina sup-izq   (pequeño)
+     *          ├── Label palo — esquina sup-der   (balance)
+     *          ├── Label palo — centro             (grande)
+     *          └── Label rango — esquina inf-izq  (bold)
      * </pre>
      *
      * @param carta  carta del modelo a representar
-     * @param esMesa {@code true} para la carta central de la mesa (dimensiones y
-     *               bordes diferenciados)
-     * @return StackPane estilizado listo para añadir al árbol de escena
+     * @param esMesa {@code true} para la carta central de la mesa
+     * @return StackPane estilizado listo para insertar en el árbol de escena
      */
     private StackPane crearCartaFrontal(Carta carta, boolean esMesa) {
         StackPane card = new StackPane();
         card.getStyleClass().add(esMesa ? "card-face-mesa" : "card-face");
 
         String colorClass = carta.getPalo().esRojo() ? "carta-roja" : "carta-negra";
-
         AnchorPane layout = new AnchorPane();
         layout.setMaxSize(Double.MAX_VALUE, Double.MAX_VALUE);
 
-        // Palo pequeño — esquina superior-izquierda
         Label suitTL = new Label(carta.getPalo().getSimbolo());
         suitTL.getStyleClass().addAll("card-suit-corner", colorClass);
         AnchorPane.setTopAnchor(suitTL,  esMesa ? 9.0 : 7.0);
         AnchorPane.setLeftAnchor(suitTL, esMesa ? 10.0 : 8.0);
 
-        // Palo pequeño — esquina superior-derecha (balance visual)
         Label suitTR = new Label(carta.getPalo().getSimbolo());
         suitTR.getStyleClass().addAll("card-suit-corner", colorClass);
         AnchorPane.setTopAnchor(suitTR,   esMesa ? 9.0 : 7.0);
         AnchorPane.setRightAnchor(suitTR, esMesa ? 10.0 : 8.0);
 
-        // Palo grande — centrado (protagonista de la carta)
         Label suitCenter = new Label(carta.getPalo().getSimbolo());
         suitCenter.getStyleClass().addAll(
             esMesa ? "card-suit-center-mesa" : "card-suit-center", colorClass);
@@ -469,14 +585,12 @@ public class JuegoController {
         AnchorPane.setLeftAnchor(suitCenter,   0.0);
         AnchorPane.setRightAnchor(suitCenter,  0.0);
 
-        // Rango — esquina inferior-izquierda (sin solapamiento con el palo)
         Label rankBL = new Label(carta.getRango().getEtiqueta());
         rankBL.getStyleClass().addAll(
             esMesa ? "card-rank-bottom-mesa" : "card-rank-bottom", colorClass);
         AnchorPane.setBottomAnchor(rankBL, esMesa ? 9.0 : 7.0);
         AnchorPane.setLeftAnchor(rankBL,   esMesa ? 10.0 : 8.0);
 
-        // suitCenter al fondo; esquinas y rango encima
         layout.getChildren().addAll(suitCenter, suitTL, suitTR, rankBL);
         card.getChildren().add(layout);
         return card;
@@ -485,19 +599,17 @@ public class JuegoController {
     /**
      * Construye un {@link StackPane} que representa una carta boca abajo (dorso).
      *
-     * @param esMazo {@code true} para usar el estilo del mazo apilado (más grande);
-     *               {@code false} para el dorso pequeño de las cartas de la máquina
+     * @param esMazo {@code true} para el estilo del mazo apilado (mayor);
+     *               {@code false} para el dorso pequeño de la mano de la máquina
      * @return StackPane con fondo degradado y patrón interior
      */
     private StackPane crearCartaDorso(boolean esMazo) {
         StackPane card = new StackPane();
         card.getStyleClass().add(esMazo ? "card-back-mazo" : "card-back-small");
-
         StackPane inner = new StackPane();
         inner.getStyleClass().add("card-back-inner");
         StackPane.setMargin(inner, new Insets(7));
         card.getChildren().add(inner);
-
         return card;
     }
 }

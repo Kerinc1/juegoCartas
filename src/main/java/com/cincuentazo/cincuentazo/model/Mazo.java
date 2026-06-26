@@ -61,6 +61,30 @@ public class Mazo {
         return cartas.remove(cartas.size() - 1);
     }
 
+    /**
+     * Incorpora una lista de cartas recicladas al mazo y lo baraja de nuevo.
+     *
+     * <p>Invocado exclusivamente por {@link CincuentazoGame#reciclarMesaEnMazo()}
+     * cuando el mazo se agota durante una partida. Cada carta recibida es
+     * orientada boca abajo antes de incorporarse, garantizando que el estado
+     * visual no revele qué cartas se reciclaron.</p>
+     *
+     * @param cartasAReciclar cartas provenientes de la pila de descarte;
+     *                        no puede ser {@code null} ni vacía
+     * @throws IllegalArgumentException si la lista es {@code null} o vacía
+     */
+    public void recargar(List<Carta> cartasAReciclar) {
+        if (cartasAReciclar == null || cartasAReciclar.isEmpty()) {
+            throw new IllegalArgumentException(
+                "No se puede recargar el mazo con una lista nula o vacía.");
+        }
+        for (Carta c : cartasAReciclar) {
+            c.setBocaAbajo(false); // estado neutro; el jugador la volteará al recibirla
+        }
+        cartas.addAll(cartasAReciclar);
+        barajar();
+    }
+
     // ── consultas ────────────────────────────────────────────────────────
 
     /**

@@ -75,7 +75,8 @@
              BOTTOM: Mano del jugador humano + indicador de estado (HU-3)
              ============================================================ -->
         <bottom>
-            <VBox alignment="CENTER"
+            <VBox fx:id="zonaHumano"
+                  alignment="CENTER"
                   spacing="10"
                   styleClass="zona-humano">
                 <Label text="TU MANO" styleClass="lbl-jugador-titulo"/>

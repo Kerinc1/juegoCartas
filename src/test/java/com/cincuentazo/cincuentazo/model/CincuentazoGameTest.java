@@ -26,7 +26,7 @@ import static org.junit.jupiter.api.Assertions.*;
  * (método package-private) para situar el juego en un estado conocido sin
  * necesidad de jugar una secuencia real de cartas previas.</p>
  */
-@DisplayName("CincuentazoGame — inicialización (HU-2) y reglas de juego (HU-3)")
+@DisplayName("CincuentazoGame — inicialización (HU-2), reglas (HU-3) y robo (HU-4)")
 class CincuentazoGameTest {
 
     // ── Helpers compartidos ───────────────────────────────────────────────
@@ -435,6 +435,407 @@ class CincuentazoGameTest {
             Carta rey = new Carta(Rango.REY, Palo.PICAS); // 50 + (-10) = 40 ≤ 50
             assertTrue(juego.esJugable(rey),
                     "Una figura siempre puede jugarse cuando la suma no supera el límite");
+        }
+    }
+
+    // ═════════════════════════════════════════════════════════════════════
+    // HU-4 — Robo de carta y reciclaje del mazo
+    // ═════════════════════════════════════════════════════════════════════
+
+    @Nested
+    @DisplayName("HU-4 · Robo de carta y reciclaje del mazo")
+    class RoboYReciclajeTests {
+
+        private CincuentazoGame juego;
+        private Humano          humano;
+        private Maquina         maquina;
+
+        @BeforeEach
+        void setUp() {
+            juego   = crearJuego(1);
+            humano  = juego.getJugadorHumano();
+            maquina = juego.getMaquinas().get(0);
+        }
+
+        // ── Robo básico — humano ──────────────────────────────────────────
+
+        @Test
+        @DisplayName("robarCartaParaJugador(humano): la mano del humano crece en 1")
+        void testRobar_humano_aumentaMano() {
+            int antes = humano.getCantidadCartas();
+            juego.robarCartaParaJugador(humano);
+            assertEquals(antes + 1, humano.getCantidadCartas(),
+                    "La mano del humano debe aumentar en 1 tras robar");
+        }
+
+        @Test
+        @DisplayName("robarCartaParaJugador(humano): el mazo se reduce en 1")
+        void testRobar_humano_mazoDecrementa() {
+            int mazoAntes = juego.getMazo().getTamanio();
+            juego.robarCartaParaJugador(humano);
+            assertEquals(mazoAntes - 1, juego.getMazo().getTamanio(),
+                    "El mazo debe decrementarse en 1 al robar");
+        }
+
+        @Test
+        @DisplayName("robarCartaParaJugador(humano): la carta robada está boca arriba")
+        void testRobar_humano_cartaBocaArriba() {
+            int indiceNuevo = humano.getCantidadCartas(); // índice de la carta que se va a añadir
+            juego.robarCartaParaJugador(humano);
+            Carta robada = humano.getMano().get(indiceNuevo);
+            assertFalse(robada.isBocaAbajo(),
+                    "La carta robada por el humano debe estar boca arriba");
+        }
+
+        // ── Robo básico — máquina ─────────────────────────────────────────
+
+        @Test
+        @DisplayName("robarCartaParaJugador(maquina): la mano de la máquina crece en 1")
+        void testRobar_maquina_aumentaMano() {
+            int antes = maquina.getCantidadCartas();
+            juego.robarCartaParaJugador(maquina);
+            assertEquals(antes + 1, maquina.getCantidadCartas(),
+                    "La mano de la máquina debe aumentar en 1 tras robar");
+        }
+
+        @Test
+        @DisplayName("robarCartaParaJugador(maquina): la carta robada está boca abajo")
+        void testRobar_maquina_cartaBocaAbajo() {
+            int indiceNuevo = maquina.getCantidadCartas();
+            juego.robarCartaParaJugador(maquina);
+            Carta robada = maquina.getMano().get(indiceNuevo);
+            assertTrue(robada.isBocaAbajo(),
+                    "La carta robada por la máquina debe estar boca abajo");
+        }
+
+        // ── pilaDescarte tras jugarCarta ──────────────────────────────────
+
+        @Test
+        @DisplayName("Tras jugarCarta, la carta previa de la mesa pasa al descarte")
+        void testJugarCarta_cartaPrevia_vaAlDescarte() {
+            Carta mesaInicial = juego.getCartaMesa(); // carta antes de jugar
+            juego.setSumaActual(0);
+
+            Carta nueva = new Carta(Rango.DOS, Palo.CORAZONES);
+            humano.recibirCarta(nueva);
+            juego.jugarCarta(humano, nueva);
+
+            assertTrue(juego.getPilaDescarte().contains(mesaInicial),
+                    "La carta que estaba en la mesa debe pasar a la pila de descarte");
+        }
+
+        @Test
+        @DisplayName("Cada carta jugada incrementa el tamaño de la pila de descarte")
+        void testJugarCarta_pilaDescarteCreceCadaVez() {
+            juego.setSumaActual(0);
+            assertEquals(0, juego.getPilaDescarte().size(), "Descarte inicial vacío");
+
+            Carta c1 = new Carta(Rango.DOS,  Palo.CORAZONES);
+            humano.recibirCarta(c1);
+            juego.jugarCarta(humano, c1);
+            assertEquals(1, juego.getPilaDescarte().size());
+
+            Carta c2 = new Carta(Rango.TRES, Palo.PICAS);
+            humano.recibirCarta(c2);
+            juego.jugarCarta(humano, c2);
+            assertEquals(2, juego.getPilaDescarte().size());
+        }
+
+        // ── Reciclaje automático ──────────────────────────────────────────
+
+        @Test
+        @DisplayName("Cuando el mazo se vacía, robarCartaParaJugador recicla el descarte")
+        void testRobar_mazoVacio_reciclaPilaDescarte() {
+            // 1. Jugar DOS cartas para que el descarte tenga 2 cartas
+            //    (la carta inicial de la mesa + la primera jugada).
+            //    Así, tras reciclar (2 cartas al mazo) y robar 1, queda 1 en el mazo.
+            juego.setSumaActual(0);
+            Carta c1 = new Carta(Rango.DOS,  Palo.CORAZONES);
+            Carta c2 = new Carta(Rango.TRES, Palo.PICAS);
+            humano.recibirCarta(c1);
+            juego.jugarCarta(humano, c1); // cartaMesa inicial → descarte; c1 → mesa
+            humano.recibirCarta(c2);
+            juego.jugarCarta(humano, c2); // c1 → descarte; c2 → mesa
+            assertEquals(2, juego.getPilaDescarte().size(), "Pre-condición: descarte tiene 2 cartas");
+
+            // 2. Vaciar el mazo completamente
+            while (!juego.getMazo().estaVacio()) {
+                juego.getMazo().robarCarta();
+            }
+            assertTrue(juego.getMazo().estaVacio(), "Pre-condición: mazo vacío");
+
+            // 3. Robar debe reciclar (2 cartas del descarte al mazo) y luego robar 1
+            boolean reciclado = juego.robarCartaParaJugador(humano);
+
+            assertAll(
+                () -> assertTrue(reciclado,
+                        "Debe indicar que se produjo un reciclaje"),
+                () -> assertTrue(juego.getPilaDescarte().isEmpty(),
+                        "El descarte debe vaciarse tras el reciclaje"),
+                () -> assertFalse(juego.getMazo().estaVacio(),
+                        "El mazo debe tener 1 carta restante (2 recicladas − 1 robada)")
+            );
+        }
+
+        @Test
+        @DisplayName("El reciclaje del descarte NO modifica la suma actual")
+        void testReciclar_sumaActualNoVaria() {
+            juego.setSumaActual(27);
+
+            // Poblar descarte con una carta
+            Carta carta = new Carta(Rango.DOS, Palo.CORAZONES);
+            humano.recibirCarta(carta);
+            juego.jugarCarta(humano, carta);
+
+            // Vaciar mazo
+            while (!juego.getMazo().estaVacio()) {
+                juego.getMazo().robarCarta();
+            }
+
+            // La jugada aumentó la suma en 2: ahora es 29
+            int sumaAntesDeRobo = juego.getSumaActual();
+            juego.robarCartaParaJugador(humano);
+
+            assertEquals(sumaAntesDeRobo, juego.getSumaActual(),
+                    "El reciclaje del mazo NO debe alterar la suma acumulada");
+        }
+
+        @Test
+        @DisplayName("robarCartaParaJugador retorna false cuando el mazo tenía cartas")
+        void testRobar_mazoConCartas_retornaFalse() {
+            assertFalse(juego.getMazo().estaVacio(), "Pre-condición: mazo con cartas");
+            boolean reciclado = juego.robarCartaParaJugador(humano);
+            assertFalse(reciclado,
+                    "Debe retornar false si no fue necesario reciclar");
+        }
+
+        // ── MazoAgotadoException ──────────────────────────────────────────
+
+        @Test
+        @DisplayName("MazoAgotadoException si el mazo Y el descarte están vacíos")
+        void testRobar_mazoYDescarteVacios_lanzaMazoAgotadoException() {
+            // Sin haber jugado ninguna carta: descarte vacío
+            assertEquals(0, juego.getPilaDescarte().size(),
+                    "Pre-condición: descarte vacío (sin cartas jugadas)");
+
+            // Vaciar el mazo
+            while (!juego.getMazo().estaVacio()) {
+                juego.getMazo().robarCarta();
+            }
+
+            assertThrows(MazoAgotadoException.class,
+                    () -> juego.robarCartaParaJugador(humano),
+                    "Debe lanzar MazoAgotadoException cuando no hay ninguna fuente de cartas");
+        }
+
+        @Test
+        @DisplayName("El mensaje de MazoAgotadoException es descriptivo")
+        void testMazoAgotadoException_tienemensaje() {
+            while (!juego.getMazo().estaVacio()) {
+                juego.getMazo().robarCarta();
+            }
+
+            MazoAgotadoException ex = assertThrows(MazoAgotadoException.class,
+                    () -> juego.robarCartaParaJugador(humano));
+
+            assertNotNull(ex.getMessage(), "El mensaje no debe ser nulo");
+            assertFalse(ex.getMessage().isBlank(), "El mensaje no debe estar vacío");
+        }
+
+        // ── Mazo.recargar() ───────────────────────────────────────────────
+
+        @Test
+        @DisplayName("Mazo.recargar() agrega cartas y las baraja (tamaño correcto)")
+        void testMazoRecargar_aumentaTamano() {
+            Mazo mazo = new Mazo();
+            mazo.barajar();
+            int antes = mazo.getTamanio(); // 52
+
+            // Vaciar el mazo completamente
+            java.util.List<Carta> robadas = new java.util.ArrayList<>();
+            while (!mazo.estaVacio()) {
+                robadas.add(mazo.robarCarta());
+            }
+            assertEquals(0, mazo.getTamanio());
+
+            // Recargar con la mitad
+            java.util.List<Carta> mitad = robadas.subList(0, 26);
+            mazo.recargar(mitad);
+
+            assertEquals(26, mazo.getTamanio(),
+                    "El mazo debe tener 26 cartas tras recargar con la mitad");
+        }
+
+        @Test
+        @DisplayName("Mazo.recargar() con lista nula lanza IllegalArgumentException")
+        void testMazoRecargar_listaNula_lanzaExcepcion() {
+            Mazo mazo = new Mazo();
+            assertThrows(IllegalArgumentException.class,
+                    () -> mazo.recargar(null));
+        }
+
+        @Test
+        @DisplayName("Mazo.recargar() con lista vacía lanza IllegalArgumentException")
+        void testMazoRecargar_listaVacia_lanzaExcepcion() {
+            Mazo mazo = new Mazo();
+            assertThrows(IllegalArgumentException.class,
+                    () -> mazo.recargar(new java.util.ArrayList<>()));
+        }
+    }
+
+    // ═════════════════════════════════════════════════════════════════════
+    // HU-5 — Eliminación de jugador
+    // ═════════════════════════════════════════════════════════════════════
+
+    @Nested
+    @DisplayName("HU-5 · Eliminación de jugador")
+    class EliminacionJugadorTests {
+
+        private CincuentazoGame juego;
+        private Humano          humano;
+        private Maquina         maquina;
+
+        @BeforeEach
+        void setUp() {
+            juego   = crearJuego(2); // humano + 2 máquinas para probar skip de turno
+            humano  = juego.getJugadorHumano();
+            maquina = juego.getMaquinas().get(0);
+        }
+
+        // ── tieneMovimientosValidos ────────────────────────────────────────
+
+        @Test
+        @DisplayName("tieneMovimientosValidos retorna true cuando suma=0 (toda carta es jugable)")
+        void testTieneMovimientosValidos_sumaZero_retornaTrue() {
+            juego.setSumaActual(0);
+            assertTrue(juego.tieneMovimientosValidos(humano),
+                    "Con suma 0 cualquier carta suma ≤ 50, debe haber movimientos válidos");
+        }
+
+        @Test
+        @DisplayName("tieneMovimientosValidos retorna false con solo cartas de suma positiva y mesa=50")
+        void testTieneMovimientosValidos_sinJugables_retornaFalse() {
+            // Con sumaActual=50, los números 2-8 y 10 superan 50; el As también (50+1=51 ya que
+            // calcularImpacto(As)=1 cuando 50+10>50). Figuras y 9 sí son jugables; damos solo cartas positivas.
+            juego.setSumaActual(50);
+            humano.devolverTodasLasCartas(); // limpia la mano para controlar el escenario
+            humano.recibirCarta(new Carta(Rango.DOS,    Palo.CORAZONES));   // 50+2=52 > 50
+            humano.recibirCarta(new Carta(Rango.TRES,   Palo.PICAS));       // 50+3=53 > 50
+            humano.recibirCarta(new Carta(Rango.CUATRO, Palo.DIAMANTES));   // 50+4=54 > 50
+            humano.recibirCarta(new Carta(Rango.AS,     Palo.TREBOLES));    // As→1; 50+1=51 > 50
+            assertFalse(juego.tieneMovimientosValidos(humano),
+                    "Con suma=50 y mano de cartas de impacto positivo, no debe haber movimientos");
+        }
+
+        @Test
+        @DisplayName("tieneMovimientosValidos retorna false para mano vacía")
+        void testTieneMovimientosValidos_manoVacia_retornaFalse() {
+            juego.setSumaActual(10);
+            humano.devolverTodasLasCartas();
+            assertFalse(juego.tieneMovimientosValidos(humano),
+                    "Una mano vacía no tiene movimientos válidos (anyMatch sobre stream vacío = false)");
+        }
+
+        // ── eliminarJugador ────────────────────────────────────────────────
+
+        @Test
+        @DisplayName("eliminarJugador marca al humano como inactivo")
+        void testEliminarJugador_humano_marcaComoInactivo() {
+            assertTrue(humano.isActivo(), "Pre-condición: humano activo");
+            juego.eliminarJugador(humano);
+            assertFalse(humano.isActivo(), "Tras eliminar, el humano debe estar inactivo");
+        }
+
+        @Test
+        @DisplayName("eliminarJugador vacía completamente la mano del jugador")
+        void testEliminarJugador_vaciaMano() {
+            assertFalse(humano.getMano().isEmpty(), "Pre-condición: humano tiene cartas");
+            juego.eliminarJugador(humano);
+            assertEquals(0, humano.getCantidadCartas(),
+                    "Tras ser eliminado, la mano del jugador debe quedar vacía");
+        }
+
+        @Test
+        @DisplayName("eliminarJugador envía exactamente las cartas de la mano a la pila de descarte")
+        void testEliminarJugador_cartasVanADescarte() {
+            int cartasEnMano  = humano.getCantidadCartas();
+            int descarteAntes = juego.getPilaDescarte().size();
+            juego.eliminarJugador(humano);
+            assertEquals(descarteAntes + cartasEnMano, juego.getPilaDescarte().size(),
+                    "Todas las cartas de la mano deben pasar íntegramente al descarte");
+        }
+
+        @Test
+        @DisplayName("eliminarJugador funciona igual para una máquina (inactiva + mano vacía)")
+        void testEliminarJugador_maquina_marcaComoInactivo() {
+            assertTrue(maquina.isActivo(), "Pre-condición: máquina activa");
+            juego.eliminarJugador(maquina);
+            assertAll(
+                () -> assertFalse(maquina.isActivo(), "La máquina debe quedar inactiva"),
+                () -> assertEquals(0, maquina.getCantidadCartas(), "La mano de la máquina debe vaciarse")
+            );
+        }
+
+        // ── avanzarTurno con jugadores eliminados ─────────────────────────
+
+        @Test
+        @DisplayName("avanzarTurno salta la máquina eliminada y regresa al humano")
+        void testAvanzarTurno_saltaMaquinaEliminada() {
+            // ciclo: humano(0) → maquina1(1) → maquina2(2) → humano(0)
+            // Eliminar maquina2 (índice 1 en lista → turno 2)
+            Maquina maquina2 = juego.getMaquinas().get(1);
+            juego.eliminarJugador(maquina2);
+
+            juego.avanzarTurno(); // 0 → 1 (maquina1, activa)
+            assertFalse(juego.esTurnoHumano(), "turno 1 debe ser de maquina1");
+
+            juego.avanzarTurno(); // 1 → (2 eliminado, se salta) → 0
+            assertTrue(juego.esTurnoHumano(),
+                    "avanzarTurno debe saltar maquina2 eliminada y volver al humano");
+        }
+
+        @Test
+        @DisplayName("avanzarTurno salta al humano eliminado y llega a la primera máquina activa")
+        void testAvanzarTurno_humanoEliminado_saltaAMaquina() {
+            juego.eliminarJugador(humano);
+
+            // Desde turno 0 (humano eliminado), avanzar debe encontrar maquina1 (turno 1)
+            juego.avanzarTurno();
+            assertAll(
+                () -> assertFalse(juego.esTurnoHumano(),
+                        "Con humano eliminado, el turno no debe volver a índice 0"),
+                () -> assertEquals(1, juego.getTurnoActual(),
+                        "Debe avanzar a la primera máquina activa (turno 1)")
+            );
+        }
+
+        // ── contarJugadoresActivos ────────────────────────────────────────
+
+        @Test
+        @DisplayName("contarJugadoresActivos retorna 3 al inicio (humano + 2 máquinas)")
+        void testContarJugadoresActivos_inicio() {
+            assertEquals(3, juego.contarJugadoresActivos(),
+                    "Al inicio: humano + 2 máquinas = 3 activos");
+        }
+
+        @Test
+        @DisplayName("contarJugadoresActivos decrece correctamente al eliminar jugadores")
+        void testContarJugadoresActivos_decrece() {
+            juego.eliminarJugador(humano);
+            assertEquals(2, juego.contarJugadoresActivos(), "Tras eliminar al humano → 2 activos");
+            juego.eliminarJugador(maquina);
+            assertEquals(1, juego.contarJugadoresActivos(), "Tras eliminar maquina1 → 1 activo");
+        }
+
+        // ── isActivo en Jugador ───────────────────────────────────────────
+
+        @Test
+        @DisplayName("Todo jugador recién creado comienza en estado activo")
+        void testJugador_nuevoEstaActivo() {
+            assertAll(
+                () -> assertTrue(new Humano().isActivo(),  "Humano nuevo debe estar activo"),
+                () -> assertTrue(new Maquina(1).isActivo(), "Maquina nueva debe estar activa")
+            );
         }
     }
 
